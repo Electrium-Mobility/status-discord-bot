@@ -60,8 +60,8 @@ async def sync_roles(ctx):
     data = sheet.get_all_records()
 
     for entry in data:
-        username = entry.get("discordUsername")
-        status = entry.get("status")
+        username = entry.get("Discord Username")
+        status = entry.get("Status")
 
         if not username or not status:
             continue
@@ -73,6 +73,14 @@ async def sync_roles(ctx):
 
         role = discord.utils.get(guild.roles, name=status)
         if role:
+            # Remove all status roles first to avoid multiple roles
+            status_roles = ["Incoming", "Active", "Previous"]
+            for status_role_name in status_roles:
+                status_role = discord.utils.get(guild.roles, name=status_role_name)
+                if status_role and status_role in member.roles:
+                    await member.remove_roles(status_role)
+            
+            # Add new role
             await member.add_roles(role)
             print(f"✅ Assigned {role.name} to {username}")
         else:
@@ -84,10 +92,16 @@ async def sync_roles(ctx):
 @commands.has_permissions(manage_roles=True)
 async def promote(ctx):
     await ctx.send("🔁 Promoting roles: Incoming → Active, Active → Previous...")
+    
+    # First sync with Google Sheet to ensure consistency
+    await ctx.send("📋 Syncing with Google Sheet first...")
+    
+    # Call sync_roles function to ensure consistency
+    await sync_roles(ctx)
+    
+    await ctx.send("✅ Pre-sync complete. Now promoting roles...")
 
     guild = ctx.guild
-    data = sheet.get_all_records()
-
     incoming_role = discord.utils.get(guild.roles, name="Incoming")
     active_role = discord.utils.get(guild.roles, name="Active")
     previous_role = discord.utils.get(guild.roles, name="Previous")
@@ -121,6 +135,7 @@ async def promote(ctx):
     # Update Google Sheet
     if sheet_updates:
         await ctx.send("📝 Updating Google Sheet...")
+        sheet_success = False
         try:
             # Find the Status column
             headers = sheet.row_values(1)
@@ -134,12 +149,12 @@ async def promote(ctx):
                     discord_col = i + 1
             
             if status_col and discord_col:
+                # Get all Discord usernames at once to avoid multiple API calls
+                discord_values = sheet.col_values(discord_col)
+                
                 for discord_name, new_status in sheet_updates:
                     # Find the row with this Discord username
                     try:
-                        # Get all values in the Discord column
-                        discord_values = sheet.col_values(discord_col)
-                        
                         # Find the row number for this Discord username
                         for row_num, cell_value in enumerate(discord_values, 1):
                             if cell_value.strip().lower() == discord_name.lower():
@@ -149,14 +164,22 @@ async def promote(ctx):
                                 break
                     except Exception as e:
                         print(f"❌ Error updating sheet for {discord_name}: {e}")
+                        await ctx.send(f"⚠️ Failed to update sheet for {discord_name}: Network error")
+                
+                sheet_success = True
             else:
                 await ctx.send("❌ Could not find 'Status' or 'Discord Username' columns in sheet")
                 
         except Exception as e:
-            await ctx.send(f"❌ Error updating Google Sheet: {e}")
+            await ctx.send(f"❌ Error updating Google Sheet: Network timeout or connection error")
             print(f"Sheet update error: {e}")
-
-    await ctx.send("✅ Role promotion and sheet update complete.")
+        
+        if sheet_success:
+            await ctx.send("✅ Role promotion and sheet update complete.")
+        else:
+            await ctx.send("⚠️ Role promotion completed, but sheet update failed. Please check manually.")
+    else:
+        await ctx.send("✅ Role promotion complete (no changes needed).")
 
 @bot.command(name="setstatus")
 @commands.has_permissions(manage_roles=True)
@@ -232,6 +255,14 @@ async def auto_sync_roles():
 
             role = discord.utils.get(guild.roles, name=status)
             if role:
+                # Remove all status roles first to avoid multiple roles
+                status_roles = ["Incoming", "Active", "Previous"]
+                for status_role_name in status_roles:
+                    status_role = discord.utils.get(guild.roles, name=status_role_name)
+                    if status_role and status_role in member.roles:
+                        await member.remove_roles(status_role)
+                
+                # Add new role
                 await member.add_roles(role)
                 print(f"✅ [Auto] Assigned {role.name} to {username}")
             else:
