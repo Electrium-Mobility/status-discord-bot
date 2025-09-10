@@ -287,4 +287,75 @@ async def auto_sync_roles():
             else:
                 print(f"❌ [Auto] Role not found: {status}")
 
+@bot.command(name="who-intersection")
+@commands.has_permissions(manage_roles=True)
+async def who_intersection(ctx, role1_name: str, role2_name: str):
+    """List members who have both specified roles"""
+    guild = ctx.guild
+    
+    # Find the roles
+    role1 = discord.utils.get(guild.roles, name=role1_name)
+    role2 = discord.utils.get(guild.roles, name=role2_name)
+    
+    if not role1:
+        await ctx.send(f"❌ Role '{role1_name}' not found")
+        return
+    
+    if not role2:
+        await ctx.send(f"❌ Role '{role2_name}' not found")
+        return
+    
+    # Find intersection of members with both roles
+    intersection_members = []
+    for member in guild.members:
+        if role1 in member.roles and role2 in member.roles:
+            intersection_members.append(member)
+    
+    if not intersection_members:
+        await ctx.send(f"📭 No members found with both '{role1_name}' and '{role2_name}' roles")
+        return
+    
+    # Create member list
+    member_list = "\n".join([f"• {member.display_name} ({member.name})" for member in intersection_members])
+    
+    await ctx.send(f"👥 **Members with both {role1_name} and {role2_name} roles ({len(intersection_members)} total):**\n```\n{member_list}\n```")
+    
+    print(f"✅ Listed {len(intersection_members)} members with roles {role1_name} & {role2_name}")
+
+@bot.command(name="ping-intersection")
+@commands.has_permissions(manage_roles=True)
+async def ping_intersection(ctx, role1_name: str, role2_name: str):
+    """Mention members who have both specified roles"""
+    guild = ctx.guild
+    
+    # Find the roles
+    role1 = discord.utils.get(guild.roles, name=role1_name)
+    role2 = discord.utils.get(guild.roles, name=role2_name)
+    
+    if not role1:
+        await ctx.send(f"❌ Role '{role1_name}' not found")
+        return
+    
+    if not role2:
+        await ctx.send(f"❌ Role '{role2_name}' not found")
+        return
+    
+    # Find intersection of members with both roles
+    intersection_members = []
+    for member in guild.members:
+        if role1 in member.roles and role2 in member.roles:
+            intersection_members.append(member)
+    
+    if not intersection_members:
+        await ctx.send(f"📭 No members found with both '{role1_name}' and '{role2_name}' roles")
+        return
+    
+    # Create mention string
+    mentions = " ".join([member.mention for member in intersection_members])
+    
+    # Send message with mentions
+    await ctx.send(f"🔔 **Pinging members with both {role1_name} and {role2_name} roles:**\n{mentions}")
+    
+    print(f"✅ Pinged {len(intersection_members)} members with roles {role1_name} & {role2_name}")
+
 bot.run(TOKEN)
