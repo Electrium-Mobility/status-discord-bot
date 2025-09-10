@@ -73,6 +73,11 @@ async def sync_roles(ctx):
 
         role = discord.utils.get(guild.roles, name=status)
         if role:
+            # Check if user already has the correct role
+            if role in member.roles:
+                print(f"⏭️ {username} already has {role.name} role, skipping")
+                continue
+            
             # Remove all status roles first to avoid multiple roles
             status_roles = ["Incoming", "Active", "Previous"]
             for status_role_name in status_roles:
@@ -256,6 +261,11 @@ async def auto_sync_roles():
 
             role = discord.utils.get(guild.roles, name=status)
             if role:
+                # Check if user already has the correct role
+                if role in member.roles:
+                    print(f"⏭️ [Auto] {username} already has {role.name} role, skipping")
+                    continue
+                
                 # Remove all status roles first to avoid multiple roles
                 status_roles = ["Incoming", "Active", "Previous"]
                 for status_role_name in status_roles:
