@@ -224,14 +224,22 @@ async def setstatus(ctx, member: discord.Member, status: str):
             if status_col and discord_col:
                 discord_values = sheet.col_values(discord_col)
                 
+                user_found = False
                 for row_num, cell_value in enumerate(discord_values, 1):
                     if cell_value.strip().lower() == member.name.lower():
                         sheet.update_cell(row_num, status_col, status)
                         print(f"📝 Updated sheet: {member.name} → {status}")
                         await ctx.send(f"✅ Updated {member.name} status to {status} in both Discord and sheet!")
-                        return
+                        user_found = True
+                        break
                 
-                await ctx.send(f"⚠️ {member.name} not found in sheet, but Discord role updated")
+                if not user_found:
+                    # Add new user to sheet with known information
+                    next_row = len(discord_values) + 1
+                    sheet.update_cell(next_row, discord_col, member.name)
+                    sheet.update_cell(next_row, status_col, status)
+                    print(f"📝 Added new user to sheet: {member.name} → {status}")
+                    await ctx.send(f"✅ Updated {member.name} status to {status} in Discord and added to sheet!\n⚠️ **Please complete the remaining information for {member.name} in the Google Sheet.**")
             else:
                 await ctx.send("❌ Could not find 'Status' or 'Discord Username' columns in sheet")
                 
