@@ -112,9 +112,10 @@ async def promote(ctx):
     for member in guild.members:
         member_updated = False
         
+        # Previous role users remain unchanged
         if previous_role in member.roles:
-            await member.remove_roles(previous_role)
-            member_updated = True
+            print(f"{member.name}: Previous (no change)")
+            continue
 
         if active_role in member.roles:
             await member.remove_roles(active_role)
