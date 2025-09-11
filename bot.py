@@ -290,7 +290,7 @@ async def auto_sync_roles():
 @bot.command(name="who-intersection")
 @commands.has_permissions(manage_roles=True)
 async def who_intersection(ctx, role1_name: str, role2_name: str):
-    """List members who have both specified roles"""
+    """How many members have both specified roles"""
     guild = ctx.guild
     
     # Find the roles
@@ -306,21 +306,18 @@ async def who_intersection(ctx, role1_name: str, role2_name: str):
         return
     
     # Find intersection of members with both roles
-    intersection_members = []
+    intersection_number = 0
     for member in guild.members:
         if role1 in member.roles and role2 in member.roles:
-            intersection_members.append(member)
+            intersection_number += 1
     
-    if not intersection_members:
+    if intersection_number == 0:
         await ctx.send(f"📭 No members found with both '{role1_name}' and '{role2_name}' roles")
         return
     
-    # Create member list
-    member_list = "\n".join([f"• {member.display_name} ({member.name})" for member in intersection_members])
+    await ctx.send(f"👥 **{intersection_number}** members have both {role1_name} and {role2_name} roles")
     
-    await ctx.send(f"👥 **Members with both {role1_name} and {role2_name} roles ({len(intersection_members)} total):**\n```\n{member_list}\n```")
-    
-    print(f"✅ Listed {len(intersection_members)} members with roles {role1_name} & {role2_name}")
+    print(f"✅ Listed {intersection_number} members with roles {role1_name} & {role2_name}")
 
 @bot.command(name="ping-intersection")
 @commands.has_permissions(manage_roles=True)
