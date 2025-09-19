@@ -290,19 +290,25 @@ async def auto_sync_roles():
 @bot.command(name="who-intersection")
 @commands.has_permissions(manage_roles=True)
 async def who_intersection(ctx, role1_name: str, role2_name: str):
-    """How many members have both specified roles"""
+    """List members who have both specified roles
+    Note: Use '-' instead of spaces in role names (e.g., 'Senior-Developer' for 'Senior Developer')
+    """
     guild = ctx.guild
+    
+    # Replace '-' with spaces in role names to handle Discord roles with spaces
+    role1_name = role1_name.replace('-', ' ')
+    role2_name = role2_name.replace('-', ' ')
     
     # Find the roles
     role1 = discord.utils.get(guild.roles, name=role1_name)
     role2 = discord.utils.get(guild.roles, name=role2_name)
     
     if not role1:
-        await ctx.send(f"❌ Role '{role1_name}' not found")
+        await ctx.send(f"❌ Role '{role1_name}' not found\n💡 **Tip:** Use '-' instead of spaces in role names (e.g., 'Senior-Developer' for 'Senior Developer')")
         return
     
     if not role2:
-        await ctx.send(f"❌ Role '{role2_name}' not found")
+        await ctx.send(f"❌ Role '{role2_name}' not found\n💡 **Tip:** Use '-' instead of spaces in role names (e.g., 'Senior-Developer' for 'Senior Developer')")
         return
     
     # Find intersection of members with both roles
@@ -322,19 +328,25 @@ async def who_intersection(ctx, role1_name: str, role2_name: str):
 @bot.command(name="ping-intersection")
 @commands.has_permissions(manage_roles=True)
 async def ping_intersection(ctx, role1_name: str, role2_name: str):
-    """Mention members who have both specified roles"""
+    """Mention members who have both specified roles
+    Note: Use '-' instead of spaces in role names (e.g., 'Senior-Developer' for 'Senior Developer')
+    """
     guild = ctx.guild
+    
+    # Replace '-' with spaces in role names to handle Discord roles with spaces
+    role1_name = role1_name.replace('-', ' ')
+    role2_name = role2_name.replace('-', ' ')
     
     # Find the roles
     role1 = discord.utils.get(guild.roles, name=role1_name)
     role2 = discord.utils.get(guild.roles, name=role2_name)
     
     if not role1:
-        await ctx.send(f"❌ Role '{role1_name}' not found")
+        await ctx.send(f"❌ Role '{role1_name}' not found\n💡 **Tip:** Use '-' instead of spaces in role names (e.g., 'Senior-Developer' for 'Senior Developer')")
         return
     
     if not role2:
-        await ctx.send(f"❌ Role '{role2_name}' not found")
+        await ctx.send(f"❌ Role '{role2_name}' not found\n💡 **Tip:** Use '-' instead of spaces in role names (e.g., 'Senior-Developer' for 'Senior Developer')")
         return
     
     # Find intersection of members with both roles
