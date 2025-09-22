@@ -371,7 +371,11 @@ async def ping_intersection_slash(interaction: discord.Interaction, role1_name: 
 @discord.app_commands.default_permissions(manage_roles=True)
 async def check_sheet_members_slash(interaction: discord.Interaction):
     """Check if all members from Google Sheet are present in the Discord server"""
-    await interaction.response.defer()
+    try:
+        await interaction.response.defer()
+    except discord.errors.NotFound:
+        # Interaction token expired, try to send a regular response
+        return
     
     guild = interaction.guild
     
