@@ -10,6 +10,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 SHEET_ID = os.getenv("SHEET_ID")
+WORKSHEET_NAME = os.getenv("WORKSHEET_NAME" )
 
 # Check environment variables
 if not TOKEN:
@@ -23,7 +24,7 @@ if not SHEET_ID:
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
 client = gspread.authorize(creds)
-sheet = client.open_by_key(SHEET_ID).worksheet("Sheet1")
+sheet = client.open_by_key(SHEET_ID).worksheet(WORKSHEET_NAME)
 
 # Discord bot setup
 intents = discord.Intents.default()
@@ -365,5 +366,141 @@ async def ping_intersection_slash(interaction: discord.Interaction, role1_name: 
     await interaction.response.send_message(f"🔔 **Pinging members with both {role1_name} and {role2_name} roles:**\n{mentions}")
     
     print(f"✅ Pinged {len(intersection_members)} members with roles {role1_name} & {role2_name}")
+
+@bot.tree.command(name="check-sheet-members", description="Check if Google Sheet members are in Discord server")
+@discord.app_commands.default_permissions(manage_roles=True)
+async def check_sheet_members_slash(interaction: discord.Interaction):
+    """Check if all members from Google Sheet are present in the Discord server"""
+    await interaction.response.defer()
+    
+    guild = interaction.guild
+    
+    try:
+        # Get all data from the Google Sheet
+        all_records = sheet.get_all_records()
+        
+        # Get Discord server members
+        discord_members = {member.name.lower(): member for member in guild.members}
+        discord_display_names = {member.display_name.lower(): member for member in guild.members}
+        
+        # Lists to track results
+        found_members = []
+        missing_members = []
+        empty_username_rows = []
+        
+        print("🔍 Starting Google Sheet member check...")
+        print(f"📊 Total records in sheet: {len(all_records)}")
+        print(f"👥 Total Discord members: {len(guild.members)}")
+        
+        # Check each person in the sheet
+        for i, record in enumerate(all_records, start=2):  # Start from row 2 (accounting for header)
+            first_name = record.get('First Name', '').strip()
+            last_name = record.get('Last Name', '').strip()
+            discord_username = record.get('Discord Username', '').strip()
+            
+            if not discord_username:
+                empty_username_rows.append({
+                    'row': i,
+                    'name': f"{first_name} {last_name}",
+                    'first_name': first_name,
+                    'last_name': last_name
+                })
+                continue
+            
+            # Try to find the member in Discord
+            found = False
+            matched_member = None
+            
+            # Check by exact username match (case insensitive)
+            if discord_username.lower() in discord_members:
+                found = True
+                matched_member = discord_members[discord_username.lower()]
+            # Check by display name match (case insensitive)
+            elif discord_username.lower() in discord_display_names:
+                found = True
+                matched_member = discord_display_names[discord_username.lower()]
+            
+            if found:
+                found_members.append({
+                    'row': i,
+                    'name': f"{first_name} {last_name}",
+                    'discord_username': discord_username,
+                    'matched_member': matched_member
+                })
+                print(f"✅ Found: {first_name} {last_name} ({discord_username}) -> {matched_member.display_name}")
+            else:
+                missing_members.append({
+                    'row': i,
+                    'name': f"{first_name} {last_name}",
+                    'discord_username': discord_username
+                })
+                print(f"❌ Missing: {first_name} {last_name} ({discord_username})")
+        
+        # Print summary to console
+        print("\n" + "="*50)
+        print("📋 GOOGLE SHEET MEMBER CHECK SUMMARY")
+        print("="*50)
+        print(f"✅ Found in Discord: {len(found_members)}")
+        print(f"❌ Missing from Discord: {len(missing_members)}")
+        print(f"⚠️  Empty Discord Username: {len(empty_username_rows)}")
+        print(f"📊 Total processed: {len(all_records)}")
+        
+        if missing_members:
+            print(f"\n❌ MISSING MEMBERS ({len(missing_members)}):")
+            for member in missing_members:
+                print(f"   Row {member['row']}: {member['name']} ({member['discord_username']})")
+        
+        if empty_username_rows:
+            print(f"\n⚠️  EMPTY DISCORD USERNAME ({len(empty_username_rows)}):")
+            for member in empty_username_rows:
+                print(f"   Row {member['row']}: {member['name']}")
+        
+        print("="*50)
+        
+        # Send summary to Discord
+        summary_msg = f"📋 **Google Sheet Member Check Complete**\n"
+        summary_msg += f"✅ Found in Discord: **{len(found_members)}**\n"
+        summary_msg += f"❌ Missing from Discord: **{len(missing_members)}**\n"
+        if empty_username_rows:
+            summary_msg += f"⚠️ Empty Discord Username: **{len(empty_username_rows)}**\n"
+        summary_msg += f"📊 Total processed: **{len(all_records)}**\n\n"
+        
+        # Add detailed missing members list (only show who's missing)
+        if missing_members:
+            summary_msg += f"❌ **Missing Members:**\n"
+            for member in missing_members:
+                summary_msg += f"• {member['name']} ({member['discord_username']})\n"
+        
+        # Check if message is too long for Discord (2000 character limit)
+        if len(summary_msg) > 1900:  # Leave some buffer
+            # Split into multiple messages
+            base_msg = f"📋 **Google Sheet Member Check Complete**\n"
+            base_msg += f"✅ Found in Discord: **{len(found_members)}**\n"
+            base_msg += f"❌ Missing from Discord: **{len(missing_members)}**\n"
+            if empty_username_rows:
+                base_msg += f"⚠️ Empty Discord Username: **{len(empty_username_rows)}**\n"
+            base_msg += f"📊 Total processed: **{len(all_records)}**\n\n"
+            
+            await interaction.followup.send(base_msg)
+            
+            # Send missing members in chunks
+            if missing_members:
+                missing_msg = f"❌ **Missing Members:**\n"
+                for member in missing_members:
+                    line = f"• {member['name']} ({member['discord_username']})\n"
+                    if len(missing_msg + line) > 1900:
+                        await interaction.followup.send(missing_msg)
+                        missing_msg = line
+                    else:
+                        missing_msg += line
+                if missing_msg.strip():
+                    await interaction.followup.send(missing_msg)
+        else:
+            await interaction.followup.send(summary_msg)
+        
+    except Exception as e:
+        error_msg = f"❌ Error checking sheet members: {str(e)}"
+        print(error_msg)
+        await interaction.followup.send(error_msg)
 
 bot.run(TOKEN)
