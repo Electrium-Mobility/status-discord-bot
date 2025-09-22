@@ -367,10 +367,10 @@ async def ping_intersection_slash(interaction: discord.Interaction, role1_name: 
     
     print(f"✅ Pinged {len(intersection_members)} members with roles {role1_name} & {role2_name}")
 
-@bot.tree.command(name="check-sheet-members", description="Check if Google Sheet members are in Discord server")
+@bot.tree.command(name="check-sheet-members", description="Check if Google Sheet members are in Discord server (all worksheets)")
 @discord.app_commands.default_permissions(manage_roles=True)
 async def check_sheet_members_slash(interaction: discord.Interaction):
-    """Check if all members from Google Sheet are present in the Discord server"""
+    """Check if all members from all Google Sheet worksheets are present in the Discord server"""
     try:
         await interaction.response.defer()
     except discord.errors.NotFound:
@@ -380,125 +380,192 @@ async def check_sheet_members_slash(interaction: discord.Interaction):
     guild = interaction.guild
     
     try:
-        # Get all data from the Google Sheet
-        all_records = sheet.get_all_records()
+        # Get the Google Sheet (spreadsheet object)
+        spreadsheet = client.open_by_key(SHEET_ID)
+        
+        # Get all worksheets in the spreadsheet
+        all_worksheets = spreadsheet.worksheets()
         
         # Get Discord server members
         discord_members = {member.name.lower(): member for member in guild.members}
         discord_display_names = {member.display_name.lower(): member for member in guild.members}
         
-        # Lists to track results
-        found_members = []
-        missing_members = []
-        empty_username_rows = []
-        
-        print("🔍 Starting Google Sheet member check...")
-        print(f"📊 Total records in sheet: {len(all_records)}")
+        print("🔍 Starting Google Sheet member check for ALL worksheets...")
+        print(f"📊 Found {len(all_worksheets)} worksheets")
         print(f"👥 Total Discord members: {len(guild.members)}")
         
-        # Check each person in the sheet
-        for i, record in enumerate(all_records, start=2):  # Start from row 2 (accounting for header)
-            first_name = record.get('First Name', '').strip()
-            last_name = record.get('Last Name', '').strip()
-            discord_username = record.get('Discord Username', '').strip()
+        # Results for all worksheets
+        worksheet_results = {}
+        total_found = 0
+        total_missing = 0
+        total_empty = 0
+        total_processed = 0
+        
+        # Check each worksheet
+        for worksheet in all_worksheets:
+            worksheet_name = worksheet.title
+            print(f"\n📋 Checking worksheet: {worksheet_name}")
             
-            if not discord_username:
-                empty_username_rows.append({
-                    'row': i,
-                    'name': f"{first_name} {last_name}",
-                    'first_name': first_name,
-                    'last_name': last_name
-                })
+            try:
+                # Get all data from this worksheet
+                all_records = worksheet.get_all_records()
+                
+                if not all_records:
+                    print(f"⚠️  Worksheet '{worksheet_name}' is empty or has no data")
+                    continue
+                
+                # Lists to track results for this worksheet
+                found_members = []
+                missing_members = []
+                empty_username_rows = []
+                
+                # Check each person in this worksheet
+                for i, record in enumerate(all_records, start=2):  # Start from row 2 (accounting for header)
+                    first_name = record.get('First Name', '').strip()
+                    last_name = record.get('Last Name', '').strip()
+                    discord_username = record.get('Discord Username', '').strip()
+                    uwaterloo_email = record.get('UWaterloo Email', '').strip()
+                    
+                    if not discord_username:
+                        empty_username_rows.append({
+                            'row': i,
+                            'name': f"{first_name} {last_name}",
+                            'first_name': first_name,
+                            'last_name': last_name,
+                            'uwaterloo_email': uwaterloo_email
+                        })
+                        continue
+                    
+                    # Try to find the member in Discord
+                    found = False
+                    matched_member = None
+                    
+                    # Check by exact username match (case insensitive)
+                    if discord_username.lower() in discord_members:
+                        found = True
+                        matched_member = discord_members[discord_username.lower()]
+                    # Check by display name match (case insensitive)
+                    elif discord_username.lower() in discord_display_names:
+                        found = True
+                        matched_member = discord_display_names[discord_username.lower()]
+                    
+                    if found:
+                        found_members.append({
+                            'row': i,
+                            'name': f"{first_name} {last_name}",
+                            'discord_username': discord_username,
+                            'uwaterloo_email': uwaterloo_email,
+                            'matched_member': matched_member
+                        })
+                        print(f"✅ Found: {first_name} {last_name} ({discord_username})")
+                    else:
+                        missing_members.append({
+                            'row': i,
+                            'name': f"{first_name} {last_name}",
+                            'discord_username': discord_username,
+                            'uwaterloo_email': uwaterloo_email
+                        })
+                        print(f"❌ Missing: {first_name} {last_name} ({discord_username})")
+                
+                # Store results for this worksheet
+                worksheet_results[worksheet_name] = {
+                    'found': found_members,
+                    'missing': missing_members,
+                    'empty': empty_username_rows,
+                    'total': len(all_records)
+                }
+                
+                # Update totals
+                total_found += len(found_members)
+                total_missing += len(missing_members)
+                total_empty += len(empty_username_rows)
+                total_processed += len(all_records)
+                
+                print(f"📊 {worksheet_name}: {len(found_members)} found, {len(missing_members)} missing, {len(empty_username_rows)} empty")
+                
+            except Exception as worksheet_error:
+                print(f"❌ Error processing worksheet '{worksheet_name}': {str(worksheet_error)}")
                 continue
-            
-            # Try to find the member in Discord
-            found = False
-            matched_member = None
-            
-            # Check by exact username match (case insensitive)
-            if discord_username.lower() in discord_members:
-                found = True
-                matched_member = discord_members[discord_username.lower()]
-            # Check by display name match (case insensitive)
-            elif discord_username.lower() in discord_display_names:
-                found = True
-                matched_member = discord_display_names[discord_username.lower()]
-            
-            if found:
-                found_members.append({
-                    'row': i,
-                    'name': f"{first_name} {last_name}",
-                    'discord_username': discord_username,
-                    'matched_member': matched_member
-                })
-                print(f"✅ Found: {first_name} {last_name} ({discord_username}) -> {matched_member.display_name}")
-            else:
-                missing_members.append({
-                    'row': i,
-                    'name': f"{first_name} {last_name}",
-                    'discord_username': discord_username
-                })
-                print(f"❌ Missing: {first_name} {last_name} ({discord_username})")
         
-        # Print summary to console
-        print("\n" + "="*50)
-        print("📋 GOOGLE SHEET MEMBER CHECK SUMMARY")
-        print("="*50)
-        print(f"✅ Found in Discord: {len(found_members)}")
-        print(f"❌ Missing from Discord: {len(missing_members)}")
-        print(f"⚠️  Empty Discord Username: {len(empty_username_rows)}")
-        print(f"📊 Total processed: {len(all_records)}")
-        
-        if missing_members:
-            print(f"\n❌ MISSING MEMBERS ({len(missing_members)}):")
-            for member in missing_members:
-                print(f"   Row {member['row']}: {member['name']} ({member['discord_username']})")
-        
-        if empty_username_rows:
-            print(f"\n⚠️  EMPTY DISCORD USERNAME ({len(empty_username_rows)}):")
-            for member in empty_username_rows:
-                print(f"   Row {member['row']}: {member['name']}")
-        
-        print("="*50)
+        # Print overall summary to console
+        print("\n" + "="*60)
+        print("📋 COMPLETE GOOGLE SHEET MEMBER CHECK SUMMARY")
+        print("="*60)
+        print(f"📊 Worksheets checked: {len(worksheet_results)}")
+        print(f"✅ Total found in Discord: {total_found}")
+        print(f"❌ Total missing from Discord: {total_missing}")
+        print(f"⚠️  Total empty Discord usernames: {total_empty}")
+        print(f"📊 Total records processed: {total_processed}")
+        print("="*60)
         
         # Send summary to Discord
-        summary_msg = f"📋 **Google Sheet Member Check Complete**\n"
-        summary_msg += f"✅ Found in Discord: **{len(found_members)}**\n"
-        summary_msg += f"❌ Missing from Discord: **{len(missing_members)}**\n"
-        if empty_username_rows:
-            summary_msg += f"⚠️ Empty Discord Username: **{len(empty_username_rows)}**\n"
-        summary_msg += f"📊 Total processed: **{len(all_records)}**\n\n"
+        summary_msg = f"📋 **Complete Google Sheet Member Check**\n"
+        summary_msg += f"📊 Worksheets checked: **{len(worksheet_results)}**\n"
+        summary_msg += f"✅ Total found: **{total_found}**\n"
+        summary_msg += f"❌ Total missing: **{total_missing}**\n"
+        if total_empty > 0:
+            summary_msg += f"⚠️ Total empty usernames: **{total_empty}**\n"
+        summary_msg += f"📊 Total processed: **{total_processed}**\n\n"
         
-        # Add detailed missing members list (only show who's missing)
-        if missing_members:
-            summary_msg += f"❌ **Missing Members:**\n"
-            for member in missing_members:
-                summary_msg += f"• {member['name']} ({member['discord_username']})\n"
+        # Add detailed results for each worksheet
+        for worksheet_name, results in worksheet_results.items():
+            found_count = len(results['found'])
+            missing_count = len(results['missing'])
+            empty_count = len(results['empty'])
+            
+            summary_msg += f"📋 **{worksheet_name}**\n"
+            summary_msg += f"   ✅ Found: {found_count} | ❌ Missing: {missing_count}"
+            if empty_count > 0:
+                summary_msg += f" | ⚠️ Empty: {empty_count}"
+            summary_msg += "\n"
+            
+            # List missing members for this worksheet
+            if results['missing']:
+                summary_msg += f"   Missing members:\n"
+                for member in results['missing']:
+                    email_info = f" - {member['uwaterloo_email']}" if member['uwaterloo_email'] else ""
+                    summary_msg += f"   • {member['name']} ({member['discord_username']}){email_info}\n"
+            summary_msg += "\n"
         
         # Check if message is too long for Discord (2000 character limit)
         if len(summary_msg) > 1900:  # Leave some buffer
-            # Split into multiple messages
-            base_msg = f"📋 **Google Sheet Member Check Complete**\n"
-            base_msg += f"✅ Found in Discord: **{len(found_members)}**\n"
-            base_msg += f"❌ Missing from Discord: **{len(missing_members)}**\n"
-            if empty_username_rows:
-                base_msg += f"⚠️ Empty Discord Username: **{len(empty_username_rows)}**\n"
-            base_msg += f"📊 Total processed: **{len(all_records)}**\n\n"
+            # Send base summary first
+            base_msg = f"📋 **Complete Google Sheet Member Check**\n"
+            base_msg += f"📊 Worksheets checked: **{len(worksheet_results)}**\n"
+            base_msg += f"✅ Total found: **{total_found}**\n"
+            base_msg += f"❌ Total missing: **{total_missing}**\n"
+            if total_empty > 0:
+                base_msg += f"⚠️ Total empty usernames: **{total_empty}**\n"
+            base_msg += f"📊 Total processed: **{total_processed}**\n\n"
             
             await interaction.followup.send(base_msg)
             
-            # Send missing members in chunks
-            if missing_members:
-                missing_msg = f"❌ **Missing Members:**\n"
-                for member in missing_members:
-                    line = f"• {member['name']} ({member['discord_username']})\n"
-                    if len(missing_msg + line) > 1900:
-                        await interaction.followup.send(missing_msg)
-                        missing_msg = line
-                    else:
-                        missing_msg += line
-                if missing_msg.strip():
-                    await interaction.followup.send(missing_msg)
+            # Send detailed results for each worksheet in separate messages
+            for worksheet_name, results in worksheet_results.items():
+                found_count = len(results['found'])
+                missing_count = len(results['missing'])
+                empty_count = len(results['empty'])
+                
+                worksheet_msg = f"📋 **{worksheet_name}**\n"
+                worksheet_msg += f"✅ Found: {found_count} | ❌ Missing: {missing_count}"
+                if empty_count > 0:
+                    worksheet_msg += f" | ⚠️ Empty: {empty_count}"
+                worksheet_msg += "\n\n"
+                
+                # Add missing members
+                if results['missing']:
+                    worksheet_msg += f"❌ **Missing members:**\n"
+                    for member in results['missing']:
+                        email_info = f" - {member['uwaterloo_email']}" if member['uwaterloo_email'] else ""
+                        line = f"• {member['name']} ({member['discord_username']}){email_info}\n"
+                        if len(worksheet_msg + line) > 1900:
+                            await interaction.followup.send(worksheet_msg)
+                            worksheet_msg = f"📋 **{worksheet_name}** (continued)\n" + line
+                        else:
+                            worksheet_msg += line
+                
+                if worksheet_msg.strip():
+                    await interaction.followup.send(worksheet_msg)
         else:
             await interaction.followup.send(summary_msg)
         
