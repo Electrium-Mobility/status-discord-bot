@@ -24,6 +24,7 @@ import json
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from oauth2client.service_account import ServiceAccountCredentials
+from auto_sync_outline import auto_sync_outline_command, validate_config_command
 
 # ============================================================================
 # ENVIRONMENT CONFIGURATION
@@ -42,6 +43,29 @@ WORKSHEET_NAME = os.getenv("WORKSHEET_NAME")
 # Outline API configuration
 OUTLINE_API_URL = os.getenv("OUTLINE_API_URL")
 OUTLINE_API_TOKEN = os.getenv("OUTLINE_API_TOKEN")
+
+# Load role mapping configuration
+ROLE_MAPPING_FILE = "role_mapping.json"
+role_mappings = {}
+
+def load_role_mappings():
+    """Load role mappings from JSON configuration file."""
+    global role_mappings
+    try:
+        with open(ROLE_MAPPING_FILE, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+            role_mappings = config.get('role_mappings', {})
+            print(f"✅ Loaded role mappings from {ROLE_MAPPING_FILE}")
+            return True
+    except FileNotFoundError:
+        print(f"⚠️  Warning: {ROLE_MAPPING_FILE} not found. Role mapping will be disabled.")
+        return False
+    except json.JSONDecodeError as e:
+        print(f"❌ Error parsing {ROLE_MAPPING_FILE}: {e}")
+        return False
+
+# Load role mappings on startup
+load_role_mappings()
 
 # Validate required environment variables
 if not TOKEN:
@@ -132,6 +156,24 @@ class OutlineAPI:
         """Get all groups from Outline."""
         return await self._make_request('groups.list')
     
+    async def create_group(self, name, description=None):
+        """
+        Create a new group in Outline.
+        
+        Args:
+            name (str): The name of the group to create
+            description (str): Optional description for the group
+            
+        Returns:
+            dict: The API response, or None if failed
+        """
+        data = {
+            'name': name
+        }
+        if description:
+            data['description'] = description
+        return await self._make_request('groups.create', data)
+    
     async def add_user_to_group(self, user_id, group_id):
         """
         Add a user to a group.
@@ -165,6 +207,42 @@ class OutlineAPI:
             'groupId': group_id
         }
         return await self._make_request('groups.removeUser', data)
+
+def get_outline_group_name(discord_role_name):
+    """
+    Get the corresponding Outline group name for a Discord role.
+    
+    Args:
+        discord_role_name (str): The Discord role name
+        
+    Returns:
+        str: The corresponding Outline group name, or None if no mapping found
+    """
+    # Check all mapping categories
+    for category_name, category_data in role_mappings.items():
+        mappings = category_data.get('mappings', {})
+        if discord_role_name in mappings:
+            return mappings[discord_role_name]
+    
+    # Check for F25 pattern matching (case insensitive)
+    if 'f25' in discord_role_name.lower():
+        # Auto-generate group name for F25 projects
+        return f"F25-{discord_role_name.replace('F25', '').replace('f25', '').replace('-', '').strip()}"
+    
+    return None
+
+def get_all_mapped_roles():
+    """
+    Get all Discord roles that have Outline group mappings.
+    
+    Returns:
+        dict: Dictionary mapping Discord role names to Outline group names
+    """
+    all_mappings = {}
+    for category_name, category_data in role_mappings.items():
+        mappings = category_data.get('mappings', {})
+        all_mappings.update(mappings)
+    return all_mappings
 
 # Initialize Outline API client
 outline_api = None
@@ -997,6 +1075,85 @@ async def check_sheet_members_slash(interaction: discord.Interaction):
         error_msg = f"❌ Error checking sheet members: {str(e)}"
         print(error_msg)
         await interaction.followup.send(error_msg)
+
+# ============================================================================
+# AUTO SYNC OUTLINE COMMAND
+# ============================================================================
+
+@bot.tree.command(name="test-outline-features", description="Test Outline features (validation + dry run)")
+@discord.app_commands.default_permissions(manage_roles=True)
+async def test_outline_features_slash(interaction: discord.Interaction):
+    """Test Outline features with validation and dry run."""
+    await interaction.response.defer()
+    
+    try:
+        # First validate configuration
+        validation_result = await validate_config_command(interaction)
+        
+        # Then perform dry run
+        dry_run_result = await auto_sync_outline_command(interaction, bot, outline_api, role_mappings, dry_run=True)
+        
+        # Send combined results
+        await interaction.followup.send("🧪 **Outline Feature Test Complete**\n✅ Configuration validated\n🔍 Dry run completed\nCheck the results above for details.")
+        
+    except Exception as e:
+        await interaction.followup.send(f"❌ Test failed: {str(e)}")
+
+@bot.tree.command(name="sync-outline", description="Sync Discord roles to Outline groups")
+@discord.app_commands.default_permissions(manage_roles=True)
+@discord.app_commands.describe(dry_run="Whether to perform a dry run (no actual operations)")
+async def sync_outline_slash(interaction: discord.Interaction, dry_run: bool = False):
+    """Sync Discord roles to corresponding Outline groups."""
+    await auto_sync_outline_command(interaction, bot, outline_api, role_mappings, dry_run)
+
+
+
+@bot.tree.command(name="show-role-mappings", description="Show current Discord role to Outline group mappings")
+@discord.app_commands.default_permissions(manage_roles=True)
+async def show_role_mappings_slash(interaction: discord.Interaction):
+    """Show the current role mappings configuration."""
+    if not role_mappings:
+        await interaction.response.send_message("❌ No role mappings configured.", ephemeral=True)
+        return
+    
+    embed = discord.Embed(
+        title="🔗 Discord Role → Outline Group Mappings",
+        color=discord.Color.blue(),
+        description="Current role mapping configuration"
+    )
+    
+    for category_name, category_data in role_mappings.items():
+        mappings = category_data.get('mappings', {})
+        description = category_data.get('description', 'No description')
+        
+        if mappings:
+            mapping_text = "\n".join([f"• `{discord_role}` → `{outline_group}`" 
+                                    for discord_role, outline_group in mappings.items()])
+            embed.add_field(
+                name=f"📋 {category_name.replace('_', ' ').title()}",
+                value=f"*{description}*\n{mapping_text}",
+                inline=False
+            )
+    
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="reload-mappings", description="Reload role mappings from configuration file")
+@discord.app_commands.default_permissions(manage_roles=True)
+async def reload_mappings_slash(interaction: discord.Interaction):
+    """Reload role mappings from the JSON configuration file."""
+    success = load_role_mappings()
+    
+    if success:
+        mapping_count = sum(len(category.get('mappings', {})) for category in role_mappings.values())
+        await interaction.response.send_message(
+            f"✅ Successfully reloaded role mappings! Found {mapping_count} role mappings across {len(role_mappings)} categories.",
+            ephemeral=True
+        )
+    else:
+        await interaction.response.send_message(
+            "❌ Failed to reload role mappings. Check the console for error details.",
+            ephemeral=True
+        )
 
 # ================================================================================================
 # BOT STARTUP

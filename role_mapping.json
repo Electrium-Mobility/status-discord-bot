@@ -1,0 +1,44 @@
+{
+  "role_mappings": {
+    "f25_projects": {
+      "description": "F25 project groups - all roles containing 'f25' or 'F25'",
+      "mappings": {
+        "Bike-F25": "F25-Bike-Team",
+        "Skateboard-F25": "F25-Skateboard-Team",
+        "MidBike-F25": "F25-MidBike-Team",
+        "F25-FW-ELEC-Project": "F25-Firmware-Electronics"
+      }
+    },
+    "leadership": {
+      "description": "Leadership and management roles",
+      "mappings": {
+        "team lead": "Team-Leads",
+        "project lead": "Project-Leads",
+        "management": "Management"
+      }
+    },
+    "departments": {
+      "description": "Department and functional groups",
+      "mappings": {
+        "Marketing": "Marketing-Team",
+        "coop": "Coops-Interns"
+      }
+    }
+  },
+  "outline_group_settings": {
+    "auto_create": true,
+    "sync_members": true,
+    "description_template": "Auto-synced from Discord role: {discord_role}"
+  },
+  "sync_settings": {
+    "auto_sync_interval": 3600,
+    "remove_members_on_role_loss": true,
+    "add_members_on_role_gain": true
+  },
+  "test_settings": {
+    "test_mode": false,
+    "dry_run": false,
+    "test_group_prefix": "TEST-",
+    "max_test_members": 5
+  }
+}
