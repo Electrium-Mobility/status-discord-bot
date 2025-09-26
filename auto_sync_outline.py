@@ -33,7 +33,8 @@ async def auto_sync_outline_command(interaction: discord.Interaction, outline_ap
         outline_api: OutlineAPI client instance
         role_mappings: Role mapping configuration
     """
-    # Note: interaction response should already be handled by the calling command
+    # Defer the response to prevent timeout for long operations
+    await interaction.response.defer()
     
     guild = interaction.guild
     results = []
@@ -223,7 +224,6 @@ async def sync_role_to_outline_group(guild, discord_role, outline_group_name, ou
         
         # Track different types of results
         synced_members = []
-        existing_members = []
         failed_members = []
         
         for member in discord_members:
@@ -233,18 +233,8 @@ async def sync_role_to_outline_group(guild, discord_role, outline_group_name, ou
             if matched_user:
                 outline_user_id = matched_user['id']
                 if dry_run:
-                    # In dry run mode, check if user is already in the group
-                    user_already_in_group = False
-                    if 'memberships' in matched_user:
-                        for membership in matched_user['memberships']:
-                            if membership.get('groupId') == outline_group_id:
-                                user_already_in_group = True
-                                break
-                    
-                    if user_already_in_group:
-                        existing_members.append(f"🔄 {member.display_name} ({member.name}) → {matched_user['name']} [Already in group]")
-                    else:
-                        synced_members.append(f"✅ {member.display_name} ({member.name}) → {matched_user['name']} [{match_reason}]")
+                    # In dry run mode, simply add to synced members
+                    synced_members.append(f"✅ {member.display_name} ({member.name}) → {matched_user['name']} [{match_reason}]")
                 else:
                     # Add user to group
                     add_response = await outline_api.add_user_to_group(outline_user_id, outline_group_id)
@@ -252,34 +242,14 @@ async def sync_role_to_outline_group(guild, discord_role, outline_group_name, ou
                         # Debug: Print the actual response to understand the format
                         print(f"🔍 DEBUG: API response for {member.display_name}: {add_response}")
                         
-                        # Check if the response indicates user already exists
-                        response_text = str(add_response).lower()
-                        print(f"🔍 DEBUG: Response text: {response_text}")
-                        
-                        # Check for various indicators of existing membership
-                        existing_keywords = ['already', 'exist', 'duplicate', 'member', 'conflict', 'present']
-                        is_existing = any(keyword in response_text for keyword in existing_keywords)
-                        
-                        # Also check if response has success=false or error field
-                        if isinstance(add_response, dict):
-                            if add_response.get('success') == False or 'error' in add_response:
-                                error_msg = add_response.get('error', {}).get('message', '').lower()
-                                print(f"🔍 DEBUG: Error message: {error_msg}")
-                                if any(keyword in error_msg for keyword in existing_keywords):
-                                    is_existing = True
-                        
-                        if is_existing:
-                            existing_members.append(f"🔄 {member.display_name} ({member.name}) → {matched_user['name']} [Already in group]")
-                        else:
-                            synced_members.append(f"✅ {member.display_name} ({member.name}) → {matched_user['name']} [{match_reason}]")
+                        synced_members.append(f"✅ {member.display_name} ({member.name}) → {matched_user['name']} [{match_reason}]")
                     else:
                         failed_members.append(f"❌ {member.display_name} ({member.name}) → {matched_user['name']} [API call failed]")
             else:
                 failed_members.append(f"❌ {member.display_name} ({member.name}) [{match_reason}]")
         
-        # Build result message with exist count
+        # Build result message
         synced_count = len(synced_members)
-        existing_count = len(existing_members)
         failed_count = len(failed_members)
         
         dry_run_prefix = "🔍 [DRY RUN] " if dry_run else ""
@@ -288,27 +258,11 @@ async def sync_role_to_outline_group(guild, discord_role, outline_group_name, ou
         status_parts = []
         if synced_count > 0:
             status_parts.append(f"{synced_count} synced")
-        if existing_count > 0:
-            status_parts.append(f"{existing_count} exist")
         if failed_count > 0:
             status_parts.append(f"{failed_count} failed")
         
         status_summary = ", ".join(status_parts) if status_parts else "0 processed"
         summary = f"{dry_run_prefix}'{discord_role.name}' → '{outline_group_name}': {status_summary}"
-        
-        # Add existing members to summary if any
-        if existing_members:
-            summary += f"\nAlready in group:"
-            existing_names = []
-            for member_info in existing_members:
-                if "🔄 " in member_info:
-                    member_part = member_info.split(" →")[0].replace("🔄 ", "")
-                    if " (" in member_part:
-                        display_name = member_part.split(" (")[0]
-                    else:
-                        display_name = member_part
-                    existing_names.append(display_name)
-            summary += f"\n{', '.join(existing_names)}"
         
         # Group failed members by failure reason
         if failed_members:

@@ -226,10 +226,10 @@ class OutlineAPI:
             dict: The API response, or None if failed
         """
         data = {
-            'userId': user_id,
-            'groupId': group_id
+            'id': group_id,
+            'userId': user_id
         }
-        return await self._make_request('groups.addUser', data)
+        return await self._make_request('groups.add_user', data)
     
     async def remove_user_from_group(self, user_id, group_id):
         """
@@ -243,10 +243,10 @@ class OutlineAPI:
             dict: The API response, or None if failed
         """
         data = {
-            'userId': user_id,
-            'groupId': group_id
+            'id': group_id,
+            'userId': user_id
         }
-        return await self._make_request('groups.removeUser', data)
+        return await self._make_request('groups.remove_user', data)
 
 def get_outline_group_name(discord_role_name):
     """
