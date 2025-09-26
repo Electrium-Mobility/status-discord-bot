@@ -157,8 +157,40 @@ class OutlineAPI:
                 return None
     
     async def get_users(self):
-        """Get all users from Outline."""
-        return await self._make_request('users.list')
+        """Get all users from Outline with pagination support."""
+        all_users = []
+        offset = 0
+        limit = 25
+        
+        while True:
+            # Make request with pagination parameters
+            response = await self._make_request('users.list', {'offset': offset, 'limit': limit})
+            
+            if not response or 'data' not in response:
+                break
+                
+            users = response['data']
+            all_users.extend(users)
+            
+            # Check if there are more pages
+            pagination = response.get('pagination', {})
+            total = pagination.get('total', 0)
+            
+            if len(all_users) >= total or not pagination.get('nextPath'):
+                break
+                
+            offset += limit
+        
+        # Return in the same format as the original API response
+        return {
+            'data': all_users,
+            'pagination': {
+                'total': len(all_users),
+                'limit': len(all_users),
+                'offset': 0
+            },
+            'ok': True
+        }
     
     async def get_groups(self):
         """Get all groups from Outline."""

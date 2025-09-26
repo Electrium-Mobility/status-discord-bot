@@ -3,10 +3,10 @@
     "f25_projects": {
       "description": "F25 project groups - all roles containing 'f25' or 'F25'",
       "mappings": {
-        "Bike-F25": "F25-Bike-Team",
-        "Skateboard-F25": "F25-Skateboard-Team",
-        "MidBike-F25": "F25-MidBike-Team",
-        "F25-FW-ELEC-Project": "F25-Firmware-Electronics"
+        "Bike-F25": "F25-Bike",
+        "Skateboard-F25": "F25-Skateboard",
+        "MidBike-F25": "F25-MidBike",
+        "F25-FW-ELEC-Project": "F25-FW-ELEC-Project"
       }
     },
     "leadership": {
@@ -20,8 +20,8 @@
     "departments": {
       "description": "Department and functional groups",
       "mappings": {
-        "Marketing": "Marketing-Team",
-        "coop": "Coops-Interns"
+        "Marketing": "Marketing",
+        "coop": "Coops"
       }
     }
   },
