@@ -23,7 +23,7 @@ def load_role_mappings():
         logging.error("Invalid JSON in role_mapping.json")
         return {}
 
-async def auto_sync_outline_command(interaction: discord.Interaction, outline_api, dry_run: bool = False):
+async def auto_sync_outline_command(interaction: discord.Interaction, outline_api, role_mappings, dry_run: bool = False):
     """
     Auto-sync all mapped Discord roles to corresponding Outline groups.
     
@@ -33,15 +33,7 @@ async def auto_sync_outline_command(interaction: discord.Interaction, outline_ap
         outline_api: OutlineAPI client instance
         role_mappings: Role mapping configuration
     """
-    if not outline_api:
-        await interaction.response.send_message("❌ Outline API is not configured.", ephemeral=True)
-        return
-    
-    if not role_mappings:
-        await interaction.response.send_message("❌ Role mappings are not configured.", ephemeral=True)
-        return
-    
-    await interaction.response.defer()
+    # Note: interaction response should already be handled by the calling command
     
     guild = interaction.guild
     results = []
@@ -53,7 +45,17 @@ async def auto_sync_outline_command(interaction: discord.Interaction, outline_ap
             await interaction.followup.send("❌ Failed to fetch Outline groups.")
             return
         
-        outline_groups = {group['name']: group for group in outline_groups_response['data']}
+        # Handle nested response structure for groups
+        groups_data = outline_groups_response['data']
+        if isinstance(groups_data, dict) and 'groups' in groups_data:
+            groups_list = groups_data['groups']
+        elif isinstance(groups_data, list):
+            groups_list = groups_data  # Fallback for direct array format
+        else:
+            await interaction.followup.send(f"❌ Invalid groups response structure: {type(groups_data)}")
+            return
+        
+        outline_groups = {group['name']: group for group in groups_list}
         
         # Get all mapped roles
         all_mappings = {}
@@ -74,7 +76,13 @@ async def auto_sync_outline_command(interaction: discord.Interaction, outline_ap
                 description = f"Auto-synced from Discord role: {discord_role_name}"
                 create_response = await outline_api.create_group(outline_group_name, description)
                 if create_response and 'data' in create_response:
-                    outline_groups[outline_group_name] = create_response['data']
+                    # Handle nested response structure for group creation
+                    group_data = create_response['data']
+                    if isinstance(group_data, dict):
+                        outline_groups[outline_group_name] = group_data
+                    else:
+                        results.append(f"❌ Invalid group creation response structure for '{outline_group_name}'")
+                        continue
                     results.append(f"✅ Created Outline group '{outline_group_name}'")
                 else:
                     results.append(f"❌ Failed to create Outline group '{outline_group_name}'")
@@ -119,9 +127,29 @@ async def sync_role_to_outline_group(guild, discord_role, outline_group_name, ou
         if not outline_users_response or 'data' not in outline_users_response:
             return f"❌ Failed to fetch Outline users for '{outline_group_name}'"
         
+        # DEBUG: Print the complete users response structure
+        import json
+        print(f"🔍 DEBUG - Complete users.list API response:")
+        print(f"🔍 Response type: {type(outline_users_response)}")
+        print(f"🔍 Response keys: {list(outline_users_response.keys()) if isinstance(outline_users_response, dict) else 'Not a dict'}")
+        print(f"🔍 Full response: {json.dumps(outline_users_response, indent=2)[:1000]}...")
+        
+        # Handle nested data structure: {"data": {"users": [...]}}
+        users_data = outline_users_response['data']
+        if isinstance(users_data, dict) and 'users' in users_data:
+            users_list = users_data['users']
+            print(f"🔍 Using nested structure: data.users (length: {len(users_list)})")
+        elif isinstance(users_data, list):
+            users_list = users_data  # Fallback for direct array format
+            print(f"🔍 Using direct structure: data (length: {len(users_list)})")
+        else:
+            print(f"❌ Unexpected users data type: {type(users_data)}")
+            print(f"❌ Users data content: {users_data}")
+            return f"❌ Invalid users response structure for '{outline_group_name}'"
+        
         # Create email to user ID mapping
         outline_user_map = {}
-        for user in outline_users_response['data']:
+        for user in users_list:
             if user.get('email'):
                 outline_user_map[user['email'].lower()] = user['id']
         

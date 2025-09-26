@@ -24,7 +24,7 @@ import json
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from oauth2client.service_account import ServiceAccountCredentials
-from auto_sync_outline import auto_sync_outline_command, validate_config_command
+from auto_sync_outline import auto_sync_outline_command
 
 # ============================================================================
 # ENVIRONMENT CONFIGURATION
@@ -37,7 +37,7 @@ load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
 # Google Sheets configuration
-SHEET_ID = os.getenv("SHEET_ID")
+SHEET_ID = os.getenv("GOOGLE_SHEETS_ID")  # Changed from SHEET_ID to GOOGLE_SHEETS_ID
 WORKSHEET_NAME = os.getenv("WORKSHEET_NAME")
 
 # Outline API configuration
@@ -72,7 +72,7 @@ if not TOKEN:
     print("❌ Error: DISCORD_TOKEN not found in .env")
     exit(1)
 if not SHEET_ID:
-    print("❌ Error: SHEET_ID not found in .env")
+    print("❌ Error: GOOGLE_SHEETS_ID not found in .env")
     exit(1)
 
 # ============================================================================
@@ -127,7 +127,7 @@ class OutlineAPI:
         Make an HTTP request to Outline API.
         
         Args:
-            endpoint (str): The API endpoint to call
+            endpoint (str): The API endpoint to call (e.g., 'users.list', 'groups.list')
             data (dict, optional): JSON data to send with the request
             
         Returns:
@@ -137,12 +137,20 @@ class OutlineAPI:
         
         async with aiohttp.ClientSession() as session:
             try:
-                async with session.post(url, headers=self.headers, json=data) as response:
+                async with session.post(url, headers=self.headers, json=data or {}) as response:
+                    response_text = await response.text()
+                    print(f"🔍 Outline API {endpoint}: Status {response.status}")
+                    print(f"🔍 Response: {response_text[:500]}...")
+                    
                     if response.status == 200:
-                        return await response.json()
+                        try:
+                            return await response.json()
+                        except:
+                            # If response is not JSON, try to parse the text we already got
+                            import json as json_module
+                            return json_module.loads(response_text)
                     else:
-                        error_text = await response.text()
-                        print(f"❌ Outline API error {response.status}: {error_text}")
+                        print(f"❌ Outline API error {response.status}: {response_text}")
                         return None
             except Exception as e:
                 print(f"❌ Request failed: {str(e)}")
@@ -355,7 +363,26 @@ async def list_outline_groups_slash(interaction: discord.Interaction):
             await interaction.followup.send("❌ Failed to fetch groups from Outline")
             return
         
-        groups = response.get('data', [])
+        # Handle both string and dict responses
+        if isinstance(response, str):
+            try:
+                import json
+                response = json.loads(response)
+            except json.JSONDecodeError:
+                await interaction.followup.send(f"❌ Invalid JSON response from Outline API: {response[:200]}...")
+                return
+        
+        # Check if response is a dict and has the expected structure
+        if not isinstance(response, dict):
+            await interaction.followup.send(f"❌ Unexpected response format from Outline API: {type(response)}")
+            return
+        
+        # Handle the actual Outline API response structure
+        data = response.get('data', {})
+        if isinstance(data, dict):
+            groups = data.get('groups', [])
+        else:
+            groups = data if isinstance(data, list) else []
         
         if not groups:
             await interaction.followup.send("📭 No groups found in Outline")
@@ -407,8 +434,19 @@ async def sync_outline_slash(interaction: discord.Interaction, role_name: str = 
             await interaction.followup.send("❌ Failed to fetch data from Outline API")
             return
         
-        outline_users = outline_users_response.get('data', [])
-        outline_groups = outline_groups_response.get('data', [])
+        # Handle nested response structure for users
+        users_data = outline_users_response.get('data', {})
+        if isinstance(users_data, dict) and 'users' in users_data:
+            outline_users = users_data['users']
+        else:
+            outline_users = users_data if isinstance(users_data, list) else []
+        
+        # Handle nested response structure for groups  
+        groups_data = outline_groups_response.get('data', {})
+        if isinstance(groups_data, dict) and 'groups' in groups_data:
+            outline_groups = groups_data['groups']
+        else:
+            outline_groups = groups_data if isinstance(groups_data, list) else []
         
         # Create username mapping for Outline users
         outline_user_map = {}
@@ -1080,31 +1118,62 @@ async def check_sheet_members_slash(interaction: discord.Interaction):
 # AUTO SYNC OUTLINE COMMAND
 # ============================================================================
 
+@bot.tree.command(name="debug-users-api", description="Debug Outline users.list API response")
+@discord.app_commands.default_permissions(manage_roles=True)
+async def debug_users_api_slash(interaction: discord.Interaction):
+    """Debug command to check Outline users.list API response structure."""
+    if not outline_api:
+        await interaction.response.send_message("❌ Outline API not configured")
+        return
+    
+    await interaction.response.defer()
+    
+    try:
+        # Get users response
+        users_response = await outline_api.get_users()
+        
+        if users_response:
+            # Show the raw response structure
+            import json
+            response_str = json.dumps(users_response, indent=2)[:1500]  # Limit length
+            await interaction.followup.send(f"**Users API Response Structure:**\n```json\n{response_str}\n```")
+        else:
+            await interaction.followup.send("❌ Failed to get users response")
+            
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error: {str(e)}")
+
 @bot.tree.command(name="test-outline-features", description="Test Outline features (validation + dry run)")
 @discord.app_commands.default_permissions(manage_roles=True)
 async def test_outline_features_slash(interaction: discord.Interaction):
     """Test Outline features with validation and dry run."""
+    # Check if Outline API is configured
+    if not outline_api:
+        await interaction.response.send_message("❌ Outline API not configured. Please set OUTLINE_API_URL and OUTLINE_API_TOKEN in .env file")
+        return
+    
+    if not role_mappings:
+        await interaction.response.send_message("❌ Role mappings are not configured.", ephemeral=True)
+        return
+    
     await interaction.response.defer()
     
     try:
-        # First validate configuration
-        validation_result = await validate_config_command(interaction)
-        
-        # Then perform dry run
-        dry_run_result = await auto_sync_outline_command(interaction, bot, outline_api, role_mappings, dry_run=True)
+        # Perform dry run
+        dry_run_result = await auto_sync_outline_command(interaction, outline_api, role_mappings, dry_run=True)
         
         # Send combined results
-        await interaction.followup.send("🧪 **Outline Feature Test Complete**\n✅ Configuration validated\n🔍 Dry run completed\nCheck the results above for details.")
+        await interaction.followup.send("🧪 **Outline Feature Test Complete**\n🔍 Dry run completed\nCheck the results above for details.")
         
     except Exception as e:
         await interaction.followup.send(f"❌ Test failed: {str(e)}")
 
-@bot.tree.command(name="sync-outline", description="Sync Discord roles to Outline groups")
+@bot.tree.command(name="sync-outline-auto", description="Sync Discord roles to Outline groups")
 @discord.app_commands.default_permissions(manage_roles=True)
 @discord.app_commands.describe(dry_run="Whether to perform a dry run (no actual operations)")
-async def sync_outline_slash(interaction: discord.Interaction, dry_run: bool = False):
+async def sync_outline_auto_slash(interaction: discord.Interaction, dry_run: bool = False):
     """Sync Discord roles to corresponding Outline groups."""
-    await auto_sync_outline_command(interaction, bot, outline_api, role_mappings, dry_run)
+    await auto_sync_outline_command(interaction, outline_api, role_mappings, dry_run)
 
 
 
