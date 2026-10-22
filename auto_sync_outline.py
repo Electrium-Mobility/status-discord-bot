@@ -35,10 +35,10 @@ def _extract_list(response, key):
     return None
 
 async def run_outline_sync(guild, outline_api, role_mappings, dry_run: bool = False):
-    """Sync all mapped Discord roles to Outline groupd. Works without a slash command."""
+    """Sync all mapped Discord roles to Outline groups. Works without a slash command."""
     results = []
 
-    group_list = _extract_list(await outline_spi.get_groupds(), 'groups')
+    groups_list = _extract_list(await outline_api.get_groups(), 'groups')
     if groups_list is None:
         return ["❌ Failed to fetch Outline groups."]
     outline_groups = {group['name']: group for group in groups_list}
@@ -76,7 +76,7 @@ async def run_outline_sync(guild, outline_api, role_mappings, dry_run: bool = Fa
 
     return results
 
-async def auto_sync_outline_command (interaction: discord.interaction, outline_api, role_mapping, dry_run:bool = False):
+async def auto_sync_outline_command (interaction: discord.Interaction, outline_api, role_mappings, dry_run: bool = False):
     """Slash-command wrapper around run_outline_sync."""
     await interaction.response.defer()
     try:
@@ -86,16 +86,6 @@ async def auto_sync_outline_command (interaction: discord.interaction, outline_a
                 await interaction.followup.send(f"```\n{result}\n```")
         else:
             await interaction.followup.send("No role mappings found to sync.")
-    except Exception as e:
-        await interaction.followup.send(f"❌ Error during auto-sync: {str(e)}")
-        
-        # Send each role's result as a separate complete message
-        if results:
-            for result in results:
-                await interaction.followup.send(f"```\n{result}\n```")
-        else:
-            await interaction.followup.send("No role mappings found to sync.")
-    
     except Exception as e:
         await interaction.followup.send(f"❌ Error during auto-sync: {str(e)}")
 

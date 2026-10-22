@@ -870,21 +870,21 @@ async def auto_sync_roles():
         await _sync_roles_internal(guild)
     print("✅ Automated role sync complete.")
 
-    @tasks.loop(hour=1)
-    async def auto_sync_outline():
-        """Sync Discord roles to Outline groups every hour."""
-        await bot.wait_until_ready()
-        if not outline_api or not role_mappings:
-            return
-        print("🔁 Outline auto-sync running...")
-        for guild in bot.guilds:
-            try:
-                results = await run_outline_sync(guild, outline_api, role_mappings, dry_run = False)
-                for line in results:
-                    print(line)
-            except Exception as e:
-                print(f"❌ Outline auto-sync failed for guild {guild.id}: {e}")
-        print("✅ Outline auto-sync complete.")
+@tasks.loop(hours=1)
+async def auto_sync_outline():
+    """Sync Discord roles to Outline groups every hour."""
+    await bot.wait_until_ready()
+    if not outline_api or not role_mappings:
+        return
+    print("🔁 Outline auto-sync running...")
+    for guild in bot.guilds:
+        try:
+            results = await run_outline_sync(guild, outline_api, role_mappings, dry_run=False)
+            for line in results:
+                print(line)
+        except Exception as e:
+            print(f"❌ Outline auto-sync failed for guild {guild.id}: {e}")
+    print("✅ Outline auto-sync complete.")
 
 # ============================================================================
 # ROLE INTERSECTION COMMANDS
