@@ -23,86 +23,71 @@ def load_role_mappings():
         logging.error("Invalid JSON in role_mapping.json")
         return {}
 
-async def auto_sync_outline_command(interaction: discord.Interaction, outline_api, role_mappings, dry_run: bool = False):
-    """
-    Auto-sync all mapped Discord roles to corresponding Outline groups.
-    
-    Args:
-        interaction: Discord interaction object
-        bot: Discord bot instance
-        outline_api: OutlineAPI client instance
-        role_mappings: Role mapping configuration
-    """
-    # Defer the response to prevent timeout for long operations
-    await interaction.response.defer()
-    
-    guild = interaction.guild
+def _extract_list(response, key):
+    """Outline returns either {"data":[...]} or {"data":{key:[...]}}."""
+    if not response or 'data' not in response:
+        return None
+    data = response['data']
+    if isinstance(data,dict) and key in data:
+        return data[key]
+    if isinstance(data,list):
+        return data
+    return None
+
+async def run_outline_sync(guild, outline_api, role_mappings, dry_run: bool = False):
+    """Sync all mapped Discord roles to Outline groupd. Works without a slash command."""
     results = []
-    
+
+    group_list = _extract_list(await outline_spi.get_groupds(), 'groups')
+    if groups_list is None:
+        return ["❌ Failed to fetch Outline groups."]
+    outline_groups = {group['name']: group for group in groups_list}
+
+    all_mappings = {}
+    for category_data in role_mappings.values():
+        all_mappings.update(category_data.get('mappings', {}))
+
+    for discord_role_name, outline_group_name in all_mappings.items():
+        discord_role = discord.utils.get(guild.roles, name=discord_role_name)
+        if not discord_role:
+            results.append(f"⚠️  Discord role '{discord_role_name}' not found")
+            continue
+
+        create_message = ""
+        if outline_group_name not in outline_groups:
+            if dry_run:
+                create_message = f"🔍 [DRY RUN] Would create Outline group '{outline_group_name}'\n"
+                outline_groups[outline_group_name] = {'id':'mock-id-for-dry-run', 'name': outline_group_name}
+            else:
+                description = f"Auto-synced from Discord role: {discord_role_name}"
+                create_response = await outline_api.create_group(outline_group_name, description)
+                group_data = create_response.get('data') if create_response else None
+                if not isinstance(group_data, dict):
+                    results.append(f"❌ Failed to create Outline group '{outline_group_name}'")
+                    continue
+                outline_groups[outline_group_name] = group_data
+                create_message = f"✅ Created Outline group '{outline_group_name}'\n"
+
+        sync_result = await sync_role_to_outline_group(
+            guild, discord_role, outline_group_name,
+            outline_groups[outline_group_name]['id'], outline_api, dry_run
+        )
+        results.append(create_message + sync_result)
+
+    return results
+
+async def auto_sync_outline_command (interaction: discord.interaction, outline_api, role_mapping, dry_run:bool = False):
+    """Slash-command wrapper around run_outline_sync."""
+    await interaction.response.defer()
     try:
-        # Get existing Outline groups
-        outline_groups_response = await outline_api.get_groups()
-        if not outline_groups_response or 'data' not in outline_groups_response:
-            await interaction.followup.send("❌ Failed to fetch Outline groups.")
-            return
-        
-        # Handle nested response structure for groups
-        groups_data = outline_groups_response['data']
-        if isinstance(groups_data, dict) and 'groups' in groups_data:
-            groups_list = groups_data['groups']
-        elif isinstance(groups_data, list):
-            groups_list = groups_data  # Fallback for direct array format
+        results = await run_outline_sync(interaction.guild, outline_api, role_mappings, dry_run)
+        if results:
+            for result in results:
+                await interaction.followup.send(f"```\n{result}\n```")
         else:
-            await interaction.followup.send(f"❌ Invalid groups response structure: {type(groups_data)}")
-            return
-        
-        outline_groups = {group['name']: group for group in groups_list}
-        
-        # Get all mapped roles
-        all_mappings = {}
-        for category_name, category_data in role_mappings.items():
-            mappings = category_data.get('mappings', {})
-            all_mappings.update(mappings)
-        
-        # Process each mapped role
-        for discord_role_name, outline_group_name in all_mappings.items():
-            # Find Discord role
-            discord_role = discord.utils.get(guild.roles, name=discord_role_name)
-            if not discord_role:
-                results.append(f"⚠️  Discord role '{discord_role_name}' not found")
-                continue
-            
-            # Check if Outline group exists, create if not
-            create_message = ""
-            if outline_group_name not in outline_groups:
-                if dry_run:
-                    create_message = f"🔍 [DRY RUN] Would create Outline group '{outline_group_name}'\n"
-                    # Create a mock group for dry run to continue processing
-                    outline_groups[outline_group_name] = {'id': 'mock-id-for-dry-run', 'name': outline_group_name}
-                else:
-                    description = f"Auto-synced from Discord role: {discord_role_name}"
-                    create_response = await outline_api.create_group(outline_group_name, description)
-                    if create_response and 'data' in create_response:
-                        # Handle nested response structure for group creation
-                        group_data = create_response['data']
-                        if isinstance(group_data, dict):
-                            outline_groups[outline_group_name] = group_data
-                        else:
-                            results.append(f"❌ Invalid group creation response structure for '{outline_group_name}'")
-                            continue
-                        create_message = f"✅ Created Outline group '{outline_group_name}'\n"
-                    else:
-                        results.append(f"❌ Failed to create Outline group '{outline_group_name}'")
-                        continue
-            
-            # Sync members
-            sync_result = await sync_role_to_outline_group(
-                guild, discord_role, outline_group_name, outline_groups[outline_group_name]['id'], outline_api, dry_run
-            )
-            
-            # Combine create message with sync result
-            combined_result = create_message + sync_result
-            results.append(combined_result)
+            await interaction.followup.send("No role mappings found to sync.")
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error during auto-sync: {str(e)}")
         
         # Send each role's result as a separate complete message
         if results:

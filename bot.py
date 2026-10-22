@@ -24,7 +24,7 @@ import json
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from oauth2client.service_account import ServiceAccountCredentials
-from auto_sync_outline import auto_sync_outline_command
+from auto_sync_outline import auto_sync_outline_command, run_outline_sync
 
 # ============================================================================
 # ENVIRONMENT CONFIGURATION
@@ -313,8 +313,11 @@ async def on_ready():
     except Exception as e:
         print(f"❌ Failed to sync slash commands: {e}")
     
-    # Start the auto sync task
-    auto_sync_roles.start()
+    # Start background tasks (guard against restarting on reconnect)
+    if not auto_sync_roles.is_running():
+        auto_sync_roles.start()
+    if outline_api and not auto_sync_outline.is_running():
+        auto_sync_outline.start()
 
 # ============================================================================
 # OUTLINE INTEGRATION COMMANDS
@@ -866,6 +869,22 @@ async def auto_sync_roles():
     for guild in bot.guilds:
         await _sync_roles_internal(guild)
     print("✅ Automated role sync complete.")
+
+    @tasks.loop(hour=1)
+    async def auto_sync_outline():
+        """Sync Discord roles to Outline groups every hour."""
+        await bot.wait_until_ready()
+        if not outline_api or not role_mappings:
+            return
+        print("🔁 Outline auto-sync running...")
+        for guild in bot.guilds:
+            try:
+                results = await run_outline_sync(guild, outline_api, role_mappings, dry_run = False)
+                for line in results:
+                    print(line)
+            except Exception as e:
+                print(f"❌ Outline auto-sync failed for guild {guild.id}: {e}")
+        print("✅ Outline auto-sync complete.")
 
 # ============================================================================
 # ROLE INTERSECTION COMMANDS
